@@ -1,3 +1,5 @@
 build
 derby.log
+.gradle
+.idea
 *.iml

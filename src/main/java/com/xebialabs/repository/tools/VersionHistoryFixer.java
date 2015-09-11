@@ -2,15 +2,14 @@ package com.xebialabs.repository.tools;
 
 
 import java.io.File;
+import java.util.concurrent.atomic.AtomicLong;
 import javax.jcr.Credentials;
 import javax.jcr.Node;
 import javax.jcr.NodeIterator;
+import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 import javax.jcr.SimpleCredentials;
 import javax.jcr.nodetype.NodeType;
-import javax.jcr.query.Query;
-import javax.jcr.query.QueryManager;
-import javax.jcr.query.QueryResult;
 import javax.jcr.version.VersionHistory;
 import org.apache.jackrabbit.core.RepositoryImpl;
 import org.apache.jackrabbit.core.config.RepositoryConfig;
@@ -20,9 +19,7 @@ import org.kohsuke.args4j.Option;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static javax.jcr.query.Query.JCR_SQL2;
-
-public class VersionHistoryCleaner {
+public class VersionHistoryFixer {
 
     @Option(name = "-xlHome", usage = "The path to your XL product home directory", required = true)
     private String xlHomePath;
@@ -31,7 +28,7 @@ public class VersionHistoryCleaner {
     private String adminPassword = "admin";
 
     public static void main(String[] args) throws Exception {
-        new VersionHistoryCleaner().doMain(args);
+        new VersionHistoryFixer().doMain(args);
     }
 
     public void doMain(String[] args) throws Exception {
@@ -48,38 +45,42 @@ public class VersionHistoryCleaner {
         Credentials creds = new SimpleCredentials("admin", adminPassword.toCharArray());
         Session session = repository.login(creds);
         try {
-//            QueryManager qm = session.getWorkspace().getQueryManager();
-//            System.out.println("Querying all nodes");
-//            Query query = qm.createQuery("select * from [nt:base]", JCR_SQL2);
-//            QueryResult qr = query.execute();
-//            NodeIterator allNodes = qr.getNodes();
             Node rootNode = session.getNode("/");
             NodeIterator allNodes = rootNode.getNodes();
-            long totalNrOfNodes = allNodes.getSize();
-            System.out.println("# of nodes = " + totalNrOfNodes);
-            long currentNode = 0;
-            while (allNodes.hasNext()) {
-                currentNode++;
-                if((currentNode % 100) == 0) {
-                    System.out.println("Processing node " + currentNode + " of " + totalNrOfNodes);
-                }
-                Node n = allNodes.nextNode();
-                System.out.println("ID = " + n.getIdentifier() + ", path = " + n.getPath());
-                if (n.isNodeType(NodeType.MIX_VERSIONABLE)) {
-                    try {
-                        final VersionHistory history = session.getWorkspace().getVersionManager().getVersionHistory(n.getPath());
-                    } catch (InconsistentVersioningState exc) {
-                        System.out.println("Fixing broken version history for node " + n.getIdentifier() + " with path " + n.getPath());
-                        n.removeMixin(NodeType.MIX_VERSIONABLE);
-                        session.save();
-                        n.addMixin(NodeType.MIX_VERSIONABLE);
-                        session.save();
-                    }
-                }
-            }
-            System.out.println("Done!");
+            AtomicLong currentNode = new AtomicLong();
+            processNodes(session, allNodes, currentNode);
+            logger.info("Done!");
         } finally {
             session.logout();
+        }
+    }
+
+    private void processNodes(Session session, NodeIterator allNodes, AtomicLong currentNode) throws RepositoryException {
+        while (allNodes.hasNext()) {
+            if((currentNode.incrementAndGet() % 100) == 0) {
+                logger.info("Processing node #" + currentNode);
+            }
+            Node n = allNodes.nextNode();
+            cleanVersionHistory(session, n);
+            if(n.getPath().equals("/jcr:system")) {
+                continue;
+            }
+            processNodes(session, n.getNodes(), currentNode);
+        }
+    }
+
+    private void cleanVersionHistory(Session session, Node n) throws RepositoryException {
+        // System.out.println("ID = " + n.getIdentifier() + ", path = " + n.getPath());
+        if (n.isNodeType(NodeType.MIX_VERSIONABLE)) {
+            try {
+                final VersionHistory history = session.getWorkspace().getVersionManager().getVersionHistory(n.getPath());
+            } catch (InconsistentVersioningState exc) {
+                logger.info("Fixing broken version history for node " + n.getIdentifier() + " with path " + n.getPath());
+                n.removeMixin(NodeType.MIX_VERSIONABLE);
+                session.save();
+                n.addMixin(NodeType.MIX_VERSIONABLE);
+                session.save();
+            }
         }
     }
 
