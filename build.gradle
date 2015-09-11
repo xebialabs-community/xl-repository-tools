@@ -1,0 +1,33 @@
+apply plugin: 'java'
+apply plugin: 'application'
+apply plugin: 'idea'
+apply plugin: 'eclipse'
+
+repositories {
+  mavenCentral()
+  maven {
+    url 'http://download.java.net/maven/2/'
+  }
+}
+
+dependencies {
+  compile 'args4j:args4j:2.32'
+  compile 'javax.jcr:jcr:2.0'
+  compile 'org.apache.jackrabbit:jackrabbit-api:2.10.0'
+  compile 'org.apache.jackrabbit:jackrabbit-jcr-commons:2.10.0'
+  compile 'org.apache.jackrabbit:jackrabbit-core:2.10.0'
+  compile 'org.apache.jackrabbit:jackrabbit-jcr-server:2.10.0'
+  compile 'org.apache.jackrabbit:jackrabbit-spi:2.10.0'
+  compile 'org.apache.jackrabbit:jackrabbit-spi-commons:2.10.0'
+  compile 'org.apache.jackrabbit:jackrabbit-webapp:2.10.0@jar'
+  compile 'org.apache.jackrabbit:jackrabbit-webdav:2.10.0'
+}
+
+mainClassName = 'com.xebialabs.repository.tools.VersionHistoryCleaner'
+
+run {
+  if ( project.hasProperty("appArgs") ) {
+    args Eval.me(appArgs)
+  }
+ //  args [ "-xlHome", "/tmp/xld" ]
+}
