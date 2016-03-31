@@ -5,13 +5,19 @@ import org.apache.jackrabbit.core.RepositoryImpl;
 import org.apache.jackrabbit.core.config.ConfigurationException;
 import org.apache.jackrabbit.core.config.RepositoryConfig;
 import org.apache.jackrabbit.core.config.WorkspaceConfig;
+import org.apache.jackrabbit.spi.QValue;
+import org.apache.jackrabbit.spi.commons.value.QValueValue;
+import org.apache.jackrabbit.value.ReferenceValue;
+import org.apache.jackrabbit.value.WeakReferenceValue;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.Option;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.jcr.*;
+import javax.jcr.nodetype.NodeType;
 import java.io.File;
+import java.lang.ref.Reference;
 import java.lang.reflect.Field;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -25,6 +31,9 @@ public class NodeForNodeRepositoryCopier {
     @Option(name = "-dstHome", usage = "The path to your target XL product home directory", required = true)
     private String dstHome;
 
+    @Option(name = "-dstPassword", usage = "The password to your target XL product home directory", required = true)
+    private String dstPassword;
+
     public static void main(String[] args) throws Exception {
         new NodeForNodeRepositoryCopier().doMain(args);
     }
@@ -36,15 +45,19 @@ public class NodeForNodeRepositoryCopier {
         RepositoryConfig srcRepositoryConfig = getRepositoryConfig(srcHome);
         disableIndexes(srcRepositoryConfig);
 
-        RepositoryConfig dstRepositoryconfig = getRepositoryConfig(dstHome);
+        RepositoryConfig dstRepositoryConfig = getRepositoryConfig(dstHome);
 
         // Connect
-        Session srcSession = getSession(srcRepositoryConfig);
+        Session srcSession = getSession(srcRepositoryConfig, new GuestCredentials());
         try {
-            Session dstSession = getSession(dstRepositoryconfig);
+            Session dstSession = getSession(dstRepositoryConfig, new SimpleCredentials("admin", dstPassword.toCharArray()));
             try {
                 AtomicLong currentNodeCounter = new AtomicLong();
-                processNodes(srcSession, srcSession.getRootNode(), dstSession, dstSession.getRootNode(), currentNodeCounter);
+                processNodes(srcSession.getRootNode(), dstSession.getRootNode(), currentNodeCounter);
+
+                logger.info("Saving session");
+                dstSession.save();
+
                 logger.info("Done!");
             } finally {
                 dstSession.logout();
@@ -75,31 +88,83 @@ public class NodeForNodeRepositoryCopier {
         }
     }
 
-    private Session getSession(RepositoryConfig repositoryConfig) throws RepositoryException {
+    private Session getSession(RepositoryConfig repositoryConfig, Credentials credentials) throws RepositoryException {
         RepositoryImpl repository = RepositoryImpl.create(repositoryConfig);
-        return repository.login();
+        return repository.login(credentials);
     }
 
-    private void processNodes(Session srcSession, Node srcNode, Session dstSession, Node dstNode, AtomicLong currentNodeCounter) throws RepositoryException {
-        NodeIterator allNodes = srcNode.getNodes();
+    private void processNodes(Node srcParentNode, Node dstParentNode, AtomicLong currentNodeCounter) throws RepositoryException {
+        NodeIterator allNodes = srcParentNode.getNodes();
         while (allNodes.hasNext()) {
-            if((currentNodeCounter.incrementAndGet() % 100) == 0) {
+            if ((currentNodeCounter.incrementAndGet() % 100) == 0) {
+                if(currentNodeCounter.get() != 0) {
+                    logger.info("Saving session");
+                    dstParentNode.getSession().save();
+                }
+
                 logger.info("Processing node #" + currentNodeCounter);
             }
-            Node n = allNodes.nextNode();
-            copyNode(srcSession, dstSession, dstNode, n);
-            if(n.getPath().equals("/jcr:system")) {
+            Node node = allNodes.nextNode();
+            if (node.getPath().equals("/jcr:system")) {
                 continue;
             }
-            processNodes(srcSession, dstSession, n.getNodes(), currentNode);
+            Node dstNode = copyNode(dstParentNode, node);
+            processNodes(node, dstNode, currentNodeCounter);
         }
     }
 
-    private void copyNode(Session srcSession, Session dstSession, Node dstParentNode, Node srcNode) throws RepositoryException {
-        logger.info("Copying node {} with path {}", srcNode.getIdentifier(), srcNode.getPath());
-        Node dstNode = dstParentNode.addNode(srcNode.getName());
-        srcNode.get
+    private Node copyNode(Node dstParentNode, Node srcNode) throws RepositoryException {
+        Node dstNode;
+        if (dstParentNode.hasNode(srcNode.getName())) {
+            dstNode = dstParentNode.getNode(srcNode.getName());
+        } else {
+            dstNode = dstParentNode.addNode(srcNode.getName());
+        }
 
+        logger.debug("Copying node {} to node {} for path {}", srcNode.getIdentifier(), dstNode.getIdentifier(), srcNode.getPath());
+
+        dstNode.setPrimaryType(srcNode.getPrimaryNodeType().getName());
+        for (NodeType type : srcNode.getMixinNodeTypes()) {
+            dstNode.addMixin(type.getName());
+        }
+
+        PropertyIterator propertyIterator = srcNode.getProperties();
+        while (propertyIterator.hasNext()) {
+            Property property = propertyIterator.nextProperty();
+            if (property.getName().startsWith("jcr:"))
+                continue;
+
+            if(property.getType() == PropertyType.REFERENCE || property.getType() == PropertyType.WEAKREFERENCE) {
+                logger.trace("Skipping reference property {}", property.getName());
+                continue;
+            }
+
+            if (property.isMultiple()) {
+                Value[] srcValues = property.getValues();
+                logger.trace("Copying property {} with value {}", property.getName(), srcValues);
+                if(srcValues.length > 0 && isReferenceValue(srcValues[0])) {
+                    continue;
+                }
+                dstNode.setProperty(property.getName(), srcValues);
+            } else {
+                Value srcValue = property.getValue();
+                logger.trace("Copying property {} with value {}", property.getName(), srcValue);
+                if(isReferenceValue(srcValue)) {
+                    continue;
+                }
+                dstNode.setProperty(property.getName(), srcValue);
+            }
+        }
+
+        return dstNode;
     }
 
+    private boolean isReferenceValue(Value val) {
+        if(val instanceof QValueValue) {
+            int t = ((QValueValue) val).getQValue().getType();
+            return t == PropertyType.REFERENCE || t == PropertyType.WEAKREFERENCE;
+        } else {
+            return val instanceof ReferenceValue || val instanceof WeakReferenceValue;
+        }
+    }
 }
