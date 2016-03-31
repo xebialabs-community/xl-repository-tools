@@ -1,5 +1,5 @@
 build
-derby.log
+*.log
 .gradle
 .idea
 *.iml
