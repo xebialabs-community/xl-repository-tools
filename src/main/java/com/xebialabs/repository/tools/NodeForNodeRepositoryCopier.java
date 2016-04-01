@@ -30,7 +30,7 @@ public class NodeForNodeRepositoryCopier {
     @Option(name = "-dstPassword", usage = "The password to your target XL product home directory", required = true)
     private String dstPassword;
 
-    private AtomicLong currentNodeCounter = new AtomicLong();
+    private Stats stats = new Stats();
 
     public static void main(String[] args) throws Exception {
         new NodeForNodeRepositoryCopier().doMain(args);
@@ -57,7 +57,6 @@ public class NodeForNodeRepositoryCopier {
                 logger.info("Saving session");
                 dstSession.save();
                 logger.info("Done!");
-                currentNodeCounter.set(0);
                 logger.info("-------->>>>> Copying properties <<<<----------------");
                 copyPropertiesToAllNodes(srcSession.getRootNode(), dstSession.getRootNode());
                 dstSession.save();
@@ -69,6 +68,8 @@ public class NodeForNodeRepositoryCopier {
             srcSession.logout();
             srcRepository.shutdown();
             dstRepository.shutdown();
+            logger.info("---------->>>>> STATS <<<<<-----------");
+            logger.info(stats.toString());
         }
     }
 
@@ -116,7 +117,8 @@ public class NodeForNodeRepositoryCopier {
         } else {
             dstNode = dstParentNode.addNode(srcNode.getName());
         }
-        logger.debug("Copying node {} to node {} for path {}", srcNode.getIdentifier(), dstNode.getIdentifier(), srcNode.getPath());
+        stats.incrementAllNodes();
+        logger.debug("Creating with source id {} to destination id {} for path {}", srcNode.getIdentifier(), dstNode.getIdentifier(), srcNode.getPath());
         addMixinsAndType(srcNode, dstNode);
         return dstNode;
     }
@@ -145,22 +147,27 @@ public class NodeForNodeRepositoryCopier {
     }
 
     private void copyPropertyValue(Node dstNode, Node srcNode, Property property) throws RepositoryException {
-        if (property.getName().startsWith("jcr:")){
-            return;
-        }
-        logger.trace("Copying property {} on node {}", property.getName(), srcNode.getPath());
-        if(isReference(property)) {
-            copyReferenceProperty(srcNode, dstNode, property);
-        } else if (property.isMultiple()) {
-            Value[] srcValues = property.getValues();
-            dstNode.setProperty(property.getName(), srcValues);
-        } else if(property.getType() == PropertyType.BINARY) {
-            Binary binary = property.getBinary();
-            Binary dstBinary = dstNode.getSession().getValueFactory().createBinary(binary.getStream());
-            dstNode.setProperty(property.getName(), dstBinary);
-        } else {
-            Value srcValue = property.getValue();
-            dstNode.setProperty(property.getName(), srcValue);
+        try {
+            if (property.getName().startsWith("jcr:")){
+                return;
+            }
+            logger.trace("Copying property {} on node {}", property.getName(), srcNode.getPath());
+            if(isReference(property)) {
+                copyReferenceProperty(srcNode, dstNode, property);
+            } else if (property.isMultiple()) {
+                Value[] srcValues = property.getValues();
+                dstNode.setProperty(property.getName(), srcValues);
+            } else if(property.getType() == PropertyType.BINARY) {
+                Binary binary = property.getBinary();
+                Binary dstBinary = dstNode.getSession().getValueFactory().createBinary(binary.getStream());
+                dstNode.setProperty(property.getName(), dstBinary);
+            } else {
+                Value srcValue = property.getValue();
+                dstNode.setProperty(property.getName(), srcValue);
+            }
+        } catch (RepositoryException e) {
+            stats.incrementFailedProperties();
+            logger.error("Could not copy property {} on id {} and path {}", property.getName(), dstNode.getIdentifier(), dstNode.getPath());
         }
     }
 
@@ -194,11 +201,9 @@ public class NodeForNodeRepositoryCopier {
     private void forAllChildNodesDoAndSave(Node srcParentNode, Session session, NodeConsumer consumer) throws RepositoryException {
         NodeIterator allNodes = srcParentNode.getNodes();
         while (allNodes.hasNext()) {
-            if ((this.currentNodeCounter.incrementAndGet() % 100) == 0) {
-                if (this.currentNodeCounter.get() != 0) {
-                    logger.info("Saving session on node {}", currentNodeCounter.get());
-                    session.save();
-                }
+            if (this.stats.commitSession()) {
+                logger.info("Saving session on operation number {}", stats.getCounter());
+                session.save();
             }
             Node node = allNodes.nextNode();
             if (node.getPath().equals("/jcr:system")) {
