@@ -24,7 +24,7 @@ dependencies {
   compile 'org.apache.jackrabbit:jackrabbit-webdav:2.10.0'
 }
 
-mainClassName = 'com.xebialabs.repository.tools.VersionHistoryFixer'
+mainClassName = 'com.xebialabs.repository.tools.NodeForNodeRepositoryCopier'
 
 run {
   if ( project.hasProperty("appArgs") ) {
