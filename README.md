@@ -17,11 +17,13 @@ The NodeToNodeCopier copies raw repository data from one installation of XLD to 
 1. Stop your instance of XL Deploy.
 1. Prepare a fresh installation of the XL Deploy by coping all folders from old XL Deploy installation home but *skipping* `repository` folder.
 1. Go to the new installation directory and execute
-
-    ./bin/run.sh -setup -reinitialize -force
+```
+./bin/run.sh -setup -reinitialize -force
+```
 or
-    ./bin/run.cmd -setup -reinitialize -force
-
+```
+./bin/run.cmd -setup -reinitialize -force
+```
 1. Test that the fresh installation is bootable by running `./bin/run.sh` or `./bin/run.cmd`. If it's not bootable, repeat the previous steps.
 1. Stop the instance of XL Deploy.
 1. Extract `xl-reposotory-tools.zip` and navigate to the extracted directory.
@@ -30,8 +32,8 @@ or
 * `-dstHome` - full path to the fresh XL Deploy installation.
 * `-dstPassword` - admin password specified in fresh installation of the XL Deploy.
 1. After execution, find output lines like
-
+```
      ---------->>>>> STATS <<<<<-----------
      Stats{allNodes=31974, failedProperties=0}
-
+```
 If `failedProperties=0`, this means that no corrupted data was found. If it's not `0`, open `node-for-node-repository-copier.log` and search for all `ERROR` log entries.
